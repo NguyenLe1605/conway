@@ -68,7 +68,7 @@ static Grid<int> generateRandomGrid() {
 
 static Grid<int> readGridFromFile(const std::string &filename) {
   std::ifstream file(filename);
-  if (file.fail()) {
+  if (!file) {
     cerr << "Can not open file " << filename << endl;
     exit(1);
   }
@@ -127,26 +127,61 @@ static void drawGrid(LifeDisplay &disp, const Grid<int> &grid) {
   disp.repaint();
 }
 
+static int countNeighborCell(const Grid<int> &grid, int row, int col) {
+  int count = 0;
+  for (int drow = -1; drow <= 1; ++drow) {
+    for (int dcol = -1; dcol <= 1; ++dcol) {
+      if (drow == 0 && dcol == 0)
+        continue;
+      int y = row + drow;
+      int x = col + dcol;
+      if (grid.inBounds(y, x) && grid[y][x] > 0)
+        count++;
+    }
+  }
+  return count;
+}
+
+static Grid<int> cloneGrid(const Grid<int> &grid) {
+  Grid<int> newGrid(grid.numRows(), grid.numCols());
+  for (int row = 0; row < grid.numRows(); ++row) {
+    for (int col = 0; col < grid.numCols(); ++col) {
+      newGrid[row][col] = grid[row][col];
+    }
+  }
+  return newGrid;
+}
+
 static Grid<int> generateNextGenerationGrid(Grid<int> &grid) {
-  auto newGrid = grid;
-  for (auto &cell : newGrid) {
-    // TODO: Add logic the generate the cell later
-    if (cell > 0 && cell < kMaxAge) {
-      cell += 1;
+  auto newGrid = cloneGrid(grid);
+  for (int row = 0; row < grid.numRows(); ++row) {
+    for (int col = 0; col < grid.numCols(); ++col) {
+      int numNeighborCell = countNeighborCell(grid, row, col);
+      if (numNeighborCell <= 1 || numNeighborCell > 3) {
+        // kill a cell if it is lonely or overcrowded
+        newGrid[row][col] = 0;
+      } else if (numNeighborCell == 2) {
+        // the cell remains
+        if (grid[row][col] > 0 && grid[row][col] < kMaxAge) {
+          newGrid[row][col] += 1;
+        }
+      } else {
+        // bear a new cell
+        if (grid[row][col] < kMaxAge)
+          newGrid[row][col] += 1;
+      }
     }
   }
   return newGrid;
 }
 
 static bool isStableGrid(Grid<int> &currGrid, Grid<int> &newGrid) {
-  bool isStable = true;
-  for (auto &cell : currGrid) {
+  for (auto &cell : newGrid) {
     if (cell > 0 && cell < kMaxAge) {
-      isStable = false;
-      break;
+      return false;
     }
   }
-  return isStable && currGrid == newGrid;
+  return currGrid == newGrid;
 }
 
 /**
@@ -161,6 +196,13 @@ static bool advanceGrid(LifeDisplay &disp, Grid<int> &grid) {
   grid = newGrid;
   drawGrid(disp, grid);
   return canAdvance;
+}
+
+static void clearScreen(LifeDisplay &disp, Grid<int> &grid) {
+  for (auto &cell : grid) {
+    cell = 0;
+  }
+  drawGrid(disp, grid);
 }
 
 /**
@@ -191,33 +233,24 @@ static void runManualAnimation(LifeDisplay &disp, Grid<int> &grid) {
     cout << "Press enter to advance the grid, type quit to stop the "
             "simulation: ";
     getline(cin, line);
-    if (line.empty()) {
-      if (!advanceGrid(disp, grid)) {
-        cout << "Press enter to start a new simulation, type quit to stop the "
-                "simulation: ";
-        getline(cin, line);
-        if (line.empty()) {
-          grid = newGridFromUser();
-          cout << "Grid's width is " << grid.numRows() << endl;
-          cout << "Grid's height is " << grid.numCols() << endl;
-          disp.setDimensions(grid.numRows(), grid.numCols());
-          //  Write the grid out of the console
-          drawGrid(disp, grid);
-          continue;
-        } else if (line == "quit") {
-          break;
-        } else {
-          cout << "Command not support, quitting" << endl;
-          exit(0);
-        }
-      }
-    } else if (line == "quit") {
+    bool isEnter = line.empty();
+    bool cond = isEnter && !advanceGrid(disp, grid);
+    if (cond || line == "quit") {
       break;
-    } else {
+    } else if (!isEnter) {
       cout << "Command not support, quitting" << endl;
       exit(0);
     }
   }
+}
+
+static void initializeGridAndDisplay(LifeDisplay &disp, Grid<int> &grid) {
+  grid = newGridFromUser();
+  cout << "Grid's width is " << grid.numRows() << endl;
+  cout << "Grid's height is " << grid.numCols() << endl;
+  disp.setDimensions(grid.numRows(), grid.numCols());
+  //  Write the grid out of the console and draw the grid
+  drawGrid(disp, grid);
 }
 
 /**
@@ -229,46 +262,51 @@ int main() {
   LifeDisplay display;
   display.setTitle("Game of Life");
   welcome();
-  // Goal is to build a conway game of life
-  // Steps:
-  // I. Set up interfaces for user:
-  Grid<int> currGrid = newGridFromUser();
-  cout << "Grid's width is " << currGrid.numRows() << endl;
-  cout << "Grid's height is " << currGrid.numCols() << endl;
-  display.setDimensions(currGrid.numRows(), currGrid.numCols());
-  //  Write the grid out of the console
-  drawGrid(display, currGrid);
-  // II. Implement the logic and cell generation:
-  // 1. Implementing User interaction To change the board
-  // 2. Implement the timer of medium: 500ms
-  // 3. Provide options to stop by the user
+  Grid<int> currGrid;
+  initializeGridAndDisplay(display, currGrid);
+
+  // The loop of the simulation
   string line;
-  cout << "Enter manual for manual mode otherwise the simulation is run "
-          "automatically: ";
-  getline(cin, line);
-  if (line == "manual") {
-    runManualAnimation(display, currGrid);
-  } else {
-    int speed = 0;
-    cout << "Enter the simulation speed: " << endl;
-    cout << "1. slow" << endl;
-    cout << "2. medium" << endl;
-    cout << "3. fast" << endl;
-    cout << "Pick either 1, 2, or 3 to choose the simulation speed: ";
+  while (true) {
+    cout << "Enter manual for manual mode otherwise the simulation is run "
+            "automatically: ";
     getline(cin, line);
-    if (line == "1") {
-      speed = 1000;
-    } else if (line == "2") {
-      speed = 500;
-    } else if (line == "3") {
-      speed = 100;
+    if (line == "manual") {
+      runManualAnimation(display, currGrid);
     } else {
-      cout << "The option is not supported, quitting" << endl;
-      exit(1);
+      int speed = 0;
+      cout << "Enter the simulation speed: " << endl;
+      cout << "1. slow" << endl;
+      cout << "2. medium" << endl;
+      cout << "3. fast" << endl;
+      cout << "Pick either 1, 2, or 3 to choose the simulation speed: ";
+      getline(cin, line);
+      if (line == "1") {
+        speed = 1000;
+      } else if (line == "2") {
+        speed = 500;
+      } else if (line == "3") {
+        speed = 100;
+      } else {
+        cout << "The option is not supported, quitting" << endl;
+        exit(1);
+      }
+      runAnimation(display, currGrid, speed);
     }
-    runAnimation(display, currGrid, speed);
+
+    clearScreen(display, currGrid);
+    cout << "Press enter to start a new simulation, type quit to stop the "
+            "simulation: ";
+    getline(cin, line);
+    if (line.empty()) {
+      initializeGridAndDisplay(display, currGrid);
+      continue;
+    } else if (line == "quit") {
+      break;
+    } else {
+      cout << "Command not support, quitting" << endl;
+      exit(0);
+    }
   }
-  // 5. Impl the generations
-  // 6. Impl the rules
   return 0;
 }
